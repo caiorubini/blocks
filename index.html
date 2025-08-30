@@ -1,0 +1,1237 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Planejador Financeiro Visual</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Barlow:wght@400;500;600&display=swap" rel="stylesheet">
+    <style>
+        body {
+            font-family: 'Barlow', sans-serif;
+            overscroll-behavior-x: contain;
+        }
+        .column-grid {
+            grid-template-columns: repeat(33, minmax(160px, 1fr));
+            align-items: start;
+        }
+        .block, .slot-container {
+            cursor: grab;
+            transition: all 0.2s ease-in-out;
+        }
+        .block:active, .slot-container:active {
+            cursor: grabbing;
+            opacity: 0.8;
+            transform: scale(1.05);
+        }
+        .dragging {
+            opacity: 0.5;
+        }
+        .slot.drag-over, .new-transaction-drop-zone.drag-over {
+            outline: 3px dashed #3b82f6;
+            outline-offset: -3px;
+            background-color: rgba(59, 130, 246, 0.1);
+        }
+        .column.drag-over {
+             background-color: rgba(59, 130, 246, 0.05);
+        }
+        ::-webkit-scrollbar {
+            height: 8px;
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #f1f5f9;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #94a3b8;
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #64748b;
+        }
+
+        /* --- ANIMAÇÕES --- */
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(8px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .block {
+             animation: fadeIn 0.3s ease-out forwards;
+        }
+        
+        @keyframes fadeOut {
+            to { 
+                opacity: 0; 
+                transform: scale(0.9); 
+                height: 0; 
+                padding-top: 0; 
+                padding-bottom: 0; 
+                margin-bottom: 0;
+                border-width: 0;
+            }
+        }
+        .block.is-deleting {
+            animation: fadeOut 0.3s ease-out forwards;
+        }
+    </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+    <!-- Cabeçalho e Controles -->
+    <header class="bg-white shadow-sm sticky top-0 z-20 p-4 flex items-center justify-between h-[68px]">
+        <div class="flex items-center gap-4">
+            <h1 class="text-xl font-semibold text-slate-700">Blocks</h1>
+        </div>
+        <div class="flex items-center gap-4">
+            <!-- Controles (visíveis apenas quando logado) -->
+            <div id="main-controls" class="hidden items-center gap-4">
+                <div class="flex items-center gap-2">
+                    <label for="v-scale-slider" class="text-sm font-medium">Zoom V:</label>
+                    <input type="range" id="v-scale-slider" min="0.1" max="5" value="1" step="0.1" class="w-24">
+                </div>
+                 <div class="flex items-center gap-2">
+                    <label for="h-scale-slider" class="text-sm font-medium">Zoom H:</label>
+                    <input type="range" id="h-scale-slider" min="0.5" max="3" value="1" step="0.1" class="w-24">
+                </div>
+                <button id="add-block-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors">
+                    New
+                </button>
+                <button id="settings-btn" class="p-2 rounded-lg hover:bg-slate-200 transition-colors">
+                    <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" class="text-slate-600"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82-.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82-.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06-.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
+                </button>
+            </div>
+            <!-- Controles de Autenticação -->
+            <div id="auth-container">
+                <button id="login-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-semibold py-2 px-4 border border-blue-600 rounded-lg shadow-sm flex items-center gap-2">
+                    Acessar App
+                </button>
+                <div id="user-info" class="hidden items-center gap-3">
+                    <span id="user-name" class="font-medium text-sm text-slate-700">Sessão Ativa</span>
+                    <button id="logout-btn" class="text-sm font-medium text-slate-600 hover:text-blue-600">Sair</button>
+                </div>
+            </div>
+        </div>
+    </header>
+
+    <!-- Container Principal com Scroll -->
+    <main class="w-full">
+        <!-- Abas de Página -->
+        <div id="page-tabs-container" class="px-4 flex items-center gap-2 sticky top-[68px] bg-slate-100 z-10 border-b border-slate-200 h-[52px] overflow-x-auto">
+            <!-- Abas das páginas serão geradas aqui -->
+        </div>
+
+        <!-- Legenda de Categorias -->
+        <div id="category-legend-container" class="px-4 py-2 flex items-center flex-wrap gap-2 sticky top-[120px] bg-slate-100 z-10 border-b border-slate-200">
+             <button id="toggle-totals-btn" class="text-sm font-medium px-3 py-1 bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-700 transition-colors mr-2">
+                Balance: OFF
+            </button>
+            <div id="category-legend" class="flex flex-wrap gap-2">
+                <!-- Legendas das categorias serão geradas aqui -->
+            </div>
+        </div>
+        
+        <div id="main-content" class="overflow-x-auto p-4">
+            <div id="calendar-grid" class="grid column-grid gap-4">
+                <!-- As colunas serão geradas aqui pelo JavaScript -->
+            </div>
+        </div>
+    </main>
+
+    <!-- Modal para Adicionar/Editar Bloco -->
+    <div id="block-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-30">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 id="modal-title" class="text-2xl font-semibold mb-4">Novo Bloco</h2>
+            <form id="block-form">
+                <input type="hidden" id="block-id">
+                <div class="mb-4">
+                    <label for="block-value" class="block text-sm font-medium text-slate-600">Valor (R$)</label>
+                    <input type="number" id="block-value" step="0.01" class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                </div>
+                <div class="mb-4">
+                    <label for="block-name" class="block text-sm font-medium text-slate-600">Nome</label>
+                    <input type="text" id="block-name" class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                </div>
+                <div class="mb-6">
+                    <label for="block-category" class="block text-sm font-medium text-slate-600">Categoria</label>
+                    <div class="flex gap-2 mt-1">
+                        <select id="block-category" class="block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500 transition-colors" required>
+                            <!-- Opções de categoria serão geradas aqui -->
+                        </select>
+                        <input type="text" id="new-category-name" placeholder="Ou nova categoria" class="block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500">
+                    </div>
+                </div>
+                <div class="flex justify-end gap-3">
+                    <button type="button" id="delete-block-btn" class="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-lg transition-colors hidden">Excluir</button>
+                    <button type="button" id="cancel-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium py-2 px-4 rounded-lg transition-colors">Cancelar</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+
+    <!-- Modal de Gerenciamento de Página -->
+    <div id="page-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-40">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 id="page-modal-title" class="text-2xl font-semibold mb-4">Nova Página</h2>
+            <form id="page-form">
+                <input type="hidden" id="page-id">
+                <div class="mb-4">
+                    <label for="page-name" class="block text-sm font-medium text-slate-600">Nome da Página</label>
+                    <input type="text" id="page-name" class="mt-1 block w-full px-3 py-2 bg-white border border-slate-300 rounded-md shadow-sm focus:outline-none focus:ring-blue-500 focus:border-blue-500" required>
+                </div>
+                <div class="flex justify-end gap-3">
+                     <button type="button" id="page-delete-btn" class="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-lg transition-colors hidden mr-auto">Excluir</button>
+                    <button type="button" id="page-cancel-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium py-2 px-4 rounded-lg transition-colors">Cancelar</button>
+                    <button type="submit" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors">Salvar</button>
+                </div>
+            </form>
+        </div>
+    </div>
+    
+    <!-- Modal de Confirmação -->
+    <div id="confirmation-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-40">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-md">
+            <h2 id="confirmation-title" class="text-xl font-semibold mb-2">Confirmar Ação</h2>
+            <p id="confirmation-message" class="text-slate-600 mb-6">Você tem certeza?</p>
+            <div class="flex justify-end gap-3">
+                <button type="button" id="confirmation-cancel-btn" class="bg-slate-200 hover:bg-slate-300 text-slate-800 font-medium py-2 px-4 rounded-lg transition-colors">Cancelar</button>
+                <button type="button" id="confirmation-confirm-btn" class="bg-red-500 hover:bg-red-600 text-white font-medium py-2 px-4 rounded-lg transition-colors">Confirmar</button>
+            </div>
+        </div>
+    </div>
+
+
+    <!-- Modal de Configurações de Categoria -->
+    <div id="settings-modal" class="fixed inset-0 bg-black bg-opacity-50 hidden items-center justify-center z-30">
+        <div class="bg-white rounded-lg shadow-xl p-6 w-full max-w-lg">
+            <h2 class="text-2xl font-semibold mb-4">Cores das Categorias</h2>
+            <div id="category-settings-container" class="space-y-3 max-h-96 overflow-y-auto">
+                <!-- Configurações de cor serão geradas aqui -->
+            </div>
+            <div class="flex justify-end mt-6">
+                <button type="button" id="close-settings-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-medium py-2 px-4 rounded-lg transition-colors">Fechar</button>
+            </div>
+        </div>
+    </div>
+
+<script type="module">
+    // --- IMPORTS DO FIREBASE ---
+    import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+    import { getAuth, onAuthStateChanged, signInAnonymously, signOut, signInWithCustomToken } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+    import { getFirestore, doc, collection, onSnapshot, addDoc, updateDoc, deleteDoc, setDoc, getDoc, query, getDocs } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+    // --- CONFIGURAÇÃO DO FIREBASE ---
+    const firebaseConfig = typeof __firebase_config !== 'undefined' ? JSON.parse(__firebase_config) : { apiKey: "YOUR_API_KEY", authDomain: "YOUR_AUTH_DOMAIN", projectId: "YOUR_PROJECT_ID" };
+    const app = initializeApp(firebaseConfig);
+    const auth = getAuth(app);
+    const db = getFirestore(app);
+    const appId = typeof __app_id !== 'undefined' ? __app_id : 'default-app-id';
+    
+    let userId = null;
+    let pagesCollectionRef;
+    let blocksCollectionRef;
+    let categoriesDocRef;
+    let unsubscribeBlocks;
+    let unsubscribeCategories;
+    let unsubscribePages;
+
+    // --- ELEMENTOS DO DOM ---
+    const calendarGrid = document.getElementById('calendar-grid');
+    const addBlockBtn = document.getElementById('add-block-btn');
+    const blockModal = document.getElementById('block-modal');
+    const blockForm = document.getElementById('block-form');
+    const cancelBtn = document.getElementById('cancel-btn');
+    const modalTitle = document.getElementById('modal-title');
+    const deleteBlockBtn = document.getElementById('delete-block-btn');
+    const vScaleSlider = document.getElementById('v-scale-slider');
+    const hScaleSlider = document.getElementById('h-scale-slider');
+    const settingsBtn = document.getElementById('settings-btn');
+    const settingsModal = document.getElementById('settings-modal');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    const categorySettingsContainer = document.getElementById('category-settings-container');
+    const pageModal = document.getElementById('page-modal');
+    const pageForm = document.getElementById('page-form');
+    const pageModalTitle = document.getElementById('page-modal-title');
+    const pageCancelBtn = document.getElementById('page-cancel-btn');
+    const pageDeleteBtn = document.getElementById('page-delete-btn');
+    const confirmationModal = document.getElementById('confirmation-modal');
+    const loginBtn = document.getElementById('login-btn');
+    const logoutBtn = document.getElementById('logout-btn');
+    const userInfo = document.getElementById('user-info');
+    const userNameEl = document.getElementById('user-name');
+    const mainControls = document.getElementById('main-controls');
+    const pageTabsContainer = document.getElementById('page-tabs-container');
+
+    // --- ESTADO DA APLICAÇÃO ---
+    let state = {
+        blocks: [],
+        pages: [],
+        activePageId: null,
+        categories: {},
+        scale: 1,
+        hScale: 1,
+        draggedItemId: null,
+        draggedItemType: null,
+        showCategoryTotals: false,
+    };
+
+    // --- FUNÇÕES DE LÓGICA PRINCIPAL ---
+
+    function calculateColumnsStateFromData(blocks) {
+        const blocksById = new Map(blocks.map(b => [b.id, b]));
+        const columnsData = Array(32).fill(null).map(() => ({}));
+
+        const cashSlotSources = blocks.filter(b => b.category === 'Receita');
+        const creditSlotSources = blocks.filter(b => b.category === 'Cartão de Crédito');
+
+        for (let i = 1; i <= 31; i++) {
+            const dayCashSlots = cashSlotSources.filter(s => s.column > 0 && s.column <= i).reduce((acc, s) => {
+                let group = acc.find(g => g.name === s.name);
+                if (!group) {
+                    group = { name: s.name, total: 0, consumed: 0, sourceIds: [] };
+                    acc.push(group);
+                }
+                group.total += s.value;
+                group.sourceIds.push(s.id);
+                return acc;
+            }, []);
+
+            const dayCreditSlots = creditSlotSources.filter(s => s.column > 0 && s.column <= i).reduce((acc, s) => {
+                let group = acc.find(g => g.name === s.name);
+                if (!group) {
+                    group = { name: s.name, total: 0, consumed: 0, sourceIds: [] };
+                    acc.push(group);
+                }
+                group.total += s.value;
+                group.sourceIds.push(s.id);
+                return acc;
+            }, []);
+            
+            const creditCardPayments = blocks.filter(b => b.category === 'Cartão de Crédito' && b.column > 0 && b.column <= i);
+            creditCardPayments.forEach(payment => {
+                const sourceBlock = blocksById.get(payment.consumedSlotId);
+                if(sourceBlock) {
+                    const targetSlot = dayCashSlots.find(s => s.name === sourceBlock.name);
+                    if (targetSlot) targetSlot.consumed += payment.value;
+                }
+            });
+
+            const creditExpenses = blocks.filter(b => b.category !== 'Receita' && b.category !== 'Cartão de Crédito' && b.column > 0 && b.column <= i);
+            creditExpenses.forEach(expense => {
+                const sourceBlock = blocksById.get(expense.consumedSlotId);
+                 if(sourceBlock) {
+                    const targetSlot = dayCreditSlots.find(s => s.name === sourceBlock.name);
+                    if (targetSlot) targetSlot.consumed += expense.value;
+                }
+            });
+            
+            const totalCashIn = dayCashSlots.reduce((sum, s) => sum + s.total, 0);
+            const totalCashConsumed = dayCashSlots.reduce((sum, s) => sum + s.consumed, 0);
+            const totalCreditReleased = dayCreditSlots.reduce((sum, s) => sum + s.total, 0);
+            const totalCreditConsumed = dayCreditSlots.reduce((sum, s) => sum + s.consumed, 0);
+
+            columnsData[i] = {
+                cashSlots: dayCashSlots,
+                creditSlots: dayCreditSlots,
+                availableCash: totalCashIn - totalCashConsumed,
+                availableCredit: totalCreditReleased - totalCreditConsumed,
+            };
+        }
+        return columnsData;
+    }
+
+
+    // --- FUNÇÕES DE RENDERIZAÇÃO ---
+
+    function render() {
+        if (!userId) {
+            calendarGrid.innerHTML = `<div class="col-span-full text-center p-8 text-slate-500">Clique em "Acessar App" para começar.</div>`;
+            document.getElementById('category-legend').innerHTML = '';
+            pageTabsContainer.innerHTML = '';
+            return;
+        }
+
+        calendarGrid.style.gridTemplateColumns = `repeat(33, minmax(${160 * state.hScale}px, 1fr))`;
+        
+        if (!state.activePageId) {
+            calendarGrid.innerHTML = `<div class="col-span-full text-center p-8 text-slate-500">Selecione ou crie uma página para começar.</div>`;
+            renderPageTabs();
+            return;
+        }
+        
+        calendarGrid.innerHTML = '';
+        const columnsState = calculateColumnsStateFromData(state.blocks);
+        
+        const allValues = state.blocks.map(b => b.value);
+        const maxValue = allValues.length > 0 ? Math.max(...allValues, 100) : 100;
+        const globalHeightScale = 200 / maxValue;
+
+        renderCategoryLegend();
+        renderPageTabs();
+        renderColumn(0, columnsState, globalHeightScale);
+
+        for (let i = 1; i <= 31; i++) {
+            renderColumn(i, columnsState, globalHeightScale);
+        }
+        
+        setupDragAndDrop();
+    }
+
+    function renderCategoryLegend() {
+        const legendContainer = document.getElementById('category-legend');
+        legendContainer.innerHTML = '';
+
+        for (const categoryName in state.categories) {
+            const legendItem = document.createElement('div');
+            legendItem.className = 'flex items-center gap-2 px-3 py-1 rounded-full text-sm font-medium transition-colors';
+            
+            const color = state.categories[categoryName];
+            legendItem.style.backgroundColor = color;
+            legendItem.style.color = getContrastColor(color);
+
+            let content = `<span>${categoryName}</span>`;
+
+            if (state.showCategoryTotals) {
+                const total = state.blocks
+                    .filter(b => b.category === categoryName && b.column > 0)
+                    .reduce((sum, b) => sum + b.value, 0);
+                
+                if (total > 0) {
+                    content += `<span class="ml-1 font-semibold">${formatCurrencyShort(total)}</span>`;
+                }
+            }
+            
+            legendItem.innerHTML = content;
+
+            legendItem.addEventListener('dblclick', () => {
+                if (categoryName !== 'Receita' && categoryName !== 'Cartão de Crédito') {
+                    renderSettingsModal();
+                    settingsModal.classList.remove('hidden');
+                    settingsModal.classList.add('flex');
+                }
+            });
+
+            legendContainer.appendChild(legendItem);
+        }
+    }
+
+
+    function renderPageTabs() {
+        pageTabsContainer.innerHTML = '';
+        
+        if(!userId) return;
+
+        state.pages.forEach(page => {
+            const tab = document.createElement('button');
+            tab.className = `px-4 py-2 rounded-lg text-sm font-medium transition-colors whitespace-nowrap`;
+            tab.textContent = page.name;
+            if (page.id === state.activePageId) {
+                tab.classList.add('bg-blue-500', 'text-white', 'shadow-sm');
+            } else {
+                tab.classList.add('bg-white', 'hover:bg-slate-200', 'text-slate-700');
+            }
+            tab.addEventListener('click', () => switchPage(page.id));
+            tab.addEventListener('dblclick', () => openPageModal(page.id));
+            pageTabsContainer.appendChild(tab);
+        });
+
+        const addPageBtn = document.createElement('button');
+        addPageBtn.className = 'flex items-center justify-center w-8 h-8 bg-slate-200 hover:bg-slate-300 rounded-lg text-slate-600 transition-colors flex-shrink-0';
+        addPageBtn.innerHTML = `<svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>`;
+        addPageBtn.title = "Criar nova página";
+        addPageBtn.addEventListener('click', () => openPageModal());
+        pageTabsContainer.appendChild(addPageBtn);
+    }
+
+    function renderColumn(day, columnsState, globalHeightScale) {
+        const isQueue = day === 0;
+        const columnData = columnsState[day];
+
+        const columnWrapper = document.createElement('div');
+        columnWrapper.className = 'flex flex-col gap-2';
+        
+        const columnHeader = document.createElement('div');
+        columnHeader.className = 'p-2 rounded-t-lg bg-slate-200 sticky top-0 z-10 flex justify-between items-center';
+        
+        if (!isQueue) {
+            const { availableCash, availableCredit } = columnData;
+            columnHeader.innerHTML = `
+                <div class="text-xs text-slate-500 flex flex-col items-start leading-tight font-normal">
+                    <div class="flex items-center gap-1.5">
+                        <div class="w-2 h-2 rounded-full" style="background-color: ${state.categories['Receita'] || '#cccccc'};"></div>
+                        <span>${formatCurrencyShort(availableCash)}</span>
+                    </div>
+                    <div class="flex items-center gap-1.5">
+                        <div class="w-2 h-2 rounded-full" style="background-color: ${state.categories['Cartão de Crédito'] || '#cccccc'};"></div>
+                        <span>${formatCurrencyShort(availableCredit)}</span>
+                    </div>
+                </div>
+                <span class="text-xl font-semibold text-slate-700">${day}</span>
+            `;
+        } else {
+            columnHeader.textContent = 'Queue';
+            columnHeader.classList.add('justify-center', 'font-medium');
+        }
+
+        columnWrapper.appendChild(columnHeader);
+
+        const columnEl = document.createElement('div');
+        columnEl.id = `column-${day}`;
+        columnEl.className = `column bg-white rounded-b-lg shadow-md p-2 flex flex-col`;
+        columnEl.dataset.day = day;
+
+        if (!isQueue) {
+            const { cashSlots, creditSlots } = columnData;
+            
+            const slotsWrapper = document.createElement('div');
+            slotsWrapper.className = 'flex flex-col gap-1';
+
+            cashSlots.forEach(slot => {
+                const slotEl = createSlotElement(slot, globalHeightScale, 'cash', day);
+                slotsWrapper.appendChild(slotEl);
+            });
+            
+            creditSlots.forEach(slot => {
+                const slotEl = createSlotElement(slot, globalHeightScale, 'credit', day);
+                slotsWrapper.appendChild(slotEl);
+            });
+            
+            columnEl.appendChild(slotsWrapper);
+
+            const dropZone = document.createElement('div');
+            dropZone.className = 'new-transaction-drop-zone border-2 border-dashed border-slate-300 rounded-lg h-24 mt-2';
+            columnEl.appendChild(dropZone);
+
+        } else { // Coluna Queue
+            const queueBlocks = state.blocks.filter(b => b.column === 0);
+            queueBlocks.forEach(block => {
+                const blockEl = createBlockElement(block, globalHeightScale, true);
+                columnEl.appendChild(blockEl);
+            });
+        }
+        
+        columnWrapper.appendChild(columnEl);
+        calendarGrid.appendChild(columnWrapper);
+    }
+    
+    function createSlotElement(slot, scale, type, day) {
+        const endOfDayAvailable = slot.total - slot.consumed;
+        const expensesOnThisDay = state.blocks.filter(b => slot.sourceIds.includes(b.consumedSlotId) && b.column === day);
+        const consumedOnThisDay = expensesOnThisDay.reduce((sum, b) => sum + b.value, 0);
+        const startOfDayAvailable = endOfDayAvailable + consumedOnThisDay;
+
+        if (startOfDayAvailable < 0.01) {
+            return document.createDocumentFragment();
+        }
+
+        const slotContainer = document.createElement('div');
+        slotContainer.className = 'slot-container relative w-full flex flex-col justify-start border-2 rounded overflow-hidden';
+        slotContainer.draggable = true;
+        slotContainer.dataset.slotName = slot.name;
+        slotContainer.dataset.slotType = type;
+        
+        const categoryColor = type === 'cash' ? state.categories['Receita'] : state.categories['Cartão de Crédito'];
+        slotContainer.style.borderColor = categoryColor;
+        slotContainer.style.height = `${startOfDayAvailable * scale * state.scale}px`;
+        
+        if (endOfDayAvailable > 0.01) {
+            const availableEl = document.createElement('div');
+            availableEl.className = 'slot w-full text-xs p-2';
+            availableEl.style.height = `${endOfDayAvailable * scale * state.scale}px`;
+            availableEl.dataset.slotId = slot.sourceIds[0];
+            availableEl.dataset.slotType = type;
+            availableEl.style.color = categoryColor;
+            availableEl.innerHTML = `<div class="font-medium truncate">${slot.name} <span class="font-normal opacity-80">${formatCurrencyShort(endOfDayAvailable)}</span></div>`;
+            slotContainer.appendChild(availableEl);
+        }
+        
+        expensesOnThisDay.forEach(expense => {
+            const expenseEl = createBlockElement(expense, scale, true);
+            slotContainer.appendChild(expenseEl);
+        });
+
+        slotContainer.addEventListener('dblclick', (e) => {
+            if (e.target.closest('.block')) return;
+            openModal(slot.sourceIds[0]);
+        });
+        
+        return slotContainer;
+    }
+
+    function createBlockElement(block, scale = 1, applyHeight = false) {
+        const blockEl = document.createElement('div');
+        blockEl.id = block.id;
+        
+        const categoryColor = state.categories[block.category] || '#64748b';
+
+        blockEl.className = 'block p-2 rounded text-xs border-b-2 w-full';
+        const darkerBorder = shadeColor(categoryColor, -20);
+        blockEl.style.backgroundColor = categoryColor;
+        blockEl.style.borderColor = darkerBorder;
+        blockEl.style.color = getContrastColor(categoryColor);
+
+        blockEl.draggable = true;
+        blockEl.dataset.id = block.id;
+        
+        if (applyHeight) {
+            const minHeight = 32; // in pixels
+            const calculatedHeight = block.value * state.scale * scale;
+            blockEl.style.height = `${Math.max(minHeight, calculatedHeight)}px`;
+            blockEl.classList.add('flex', 'flex-col', 'pt-1'); // Alinha ao topo
+        }
+        
+        blockEl.innerHTML = `
+            <div class="font-medium truncate flex justify-between w-full">
+                <span>${block.name}</span>
+                <span>${formatCurrencyShort(block.value)}</span>
+            </div>
+        `;
+
+        blockEl.addEventListener('dblclick', (e) => {
+            e.stopPropagation();
+            openModal(block.id)
+        });
+        return blockEl;
+    }
+
+    async function renderSettingsModal() {
+        categorySettingsContainer.innerHTML = '';
+        for (const categoryName in state.categories) {
+            const div = document.createElement('div');
+            div.className = 'flex items-center justify-between p-2 rounded-lg';
+            
+            const label = document.createElement('label');
+            label.textContent = categoryName;
+            label.className = 'font-medium';
+            label.setAttribute('for', `color-${categoryName}`);
+
+            const colorInput = document.createElement('input');
+            colorInput.type = 'color';
+            colorInput.id = `color-${categoryName}`;
+            colorInput.value = state.categories[categoryName];
+            colorInput.className = 'w-10 h-10 border-none bg-transparent p-0';
+            
+            if (categoryName === 'Receita' || categoryName === 'Cartão de Crédito') {
+                colorInput.disabled = true;
+                label.title = "A cor desta categoria não pode ser alterada.";
+                label.classList.add('opacity-60');
+            } else {
+                 colorInput.addEventListener('input', async (e) => {
+                    const newCategories = { ...state.categories, [categoryName]: e.target.value };
+                    await setDoc(categoriesDocRef, newCategories);
+                });
+            }
+
+            div.appendChild(label);
+            div.appendChild(colorInput);
+            categorySettingsContainer.appendChild(div);
+        }
+    }
+
+    // --- MANIPULADORES DE EVENTOS ---
+
+    function openModal(blockId = null) {
+        if (!state.activePageId) {
+            showCustomAlert("Por favor, crie ou selecione uma página primeiro.");
+            return;
+        }
+        blockForm.reset();
+        const categorySelect = document.getElementById('block-category');
+        categorySelect.innerHTML = '';
+        Object.keys(state.categories).forEach(cat => {
+            const option = document.createElement('option');
+            option.value = cat;
+            option.textContent = cat;
+            categorySelect.appendChild(option);
+        });
+
+        const newCategoryInput = document.getElementById('new-category-name');
+        let originalCategory = categorySelect.value;
+        const newCategoryInputHandler = () => {
+             if (newCategoryInput.value.trim() !== '') {
+                if (!categorySelect.disabled) {
+                    originalCategory = categorySelect.value;
+                }
+                categorySelect.disabled = true;
+                categorySelect.classList.add('bg-slate-100', 'text-slate-400');
+            } else {
+                categorySelect.disabled = false;
+                categorySelect.classList.remove('bg-slate-100', 'text-slate-400');
+                categorySelect.value = originalCategory;
+            }
+        };
+        newCategoryInput.addEventListener('input', newCategoryInputHandler);
+        
+        // Cleanup listener on cancel
+        cancelBtn.onclick = () => {
+            closeModal();
+            newCategoryInput.removeEventListener('input', newCategoryInputHandler);
+        }
+
+
+        if (blockId) {
+            const block = state.blocks.find(b => b.id === blockId);
+            modalTitle.textContent = 'Editar Bloco';
+            document.getElementById('block-id').value = block.id;
+            document.getElementById('block-name').value = block.name;
+            document.getElementById('block-value').value = block.value;
+            categorySelect.value = block.category;
+            deleteBlockBtn.classList.remove('hidden');
+        } else {
+            modalTitle.textContent = 'Novo Bloco';
+            document.getElementById('block-id').value = '';
+            deleteBlockBtn.classList.add('hidden');
+        }
+        blockModal.classList.remove('hidden');
+        blockModal.classList.add('flex');
+        document.getElementById('block-value').focus();
+    }
+
+    function closeModal() {
+        blockModal.classList.add('hidden');
+        blockModal.classList.remove('flex');
+        blockForm.reset();
+        const categorySelect = document.getElementById('block-category');
+        categorySelect.disabled = false;
+        categorySelect.classList.remove('bg-slate-100', 'text-slate-400');
+    }
+
+    async function handleFormSubmit(e) {
+        e.preventDefault();
+        const id = document.getElementById('block-id').value;
+        const name = document.getElementById('block-name').value;
+        const value = parseFloat(document.getElementById('block-value').value);
+        let category = document.getElementById('block-category').value;
+        const newCategoryName = document.getElementById('new-category-name').value.trim();
+
+        if (newCategoryName) {
+            category = newCategoryName;
+            if (!state.categories[category]) {
+                const newCategories = { ...state.categories, [category]: getRandomColor() };
+                await setDoc(categoriesDocRef, newCategories);
+            }
+        }
+
+        const blockData = { name, value, category };
+
+        if (id) {
+            const blockDocRef = doc(db, blocksCollectionRef.path, id);
+            await updateDoc(blockDocRef, blockData);
+        } else {
+            await addDoc(blocksCollectionRef, {
+                ...blockData,
+                column: 0,
+                consumedSlotId: null
+            });
+        }
+        closeModal();
+    }
+
+    async function handleDeleteBlock() {
+        const id = document.getElementById('block-id').value;
+        if (!id) return;
+
+        const blockEl = document.getElementById(id);
+        if (blockEl) {
+             blockEl.classList.add('is-deleting');
+        }
+
+        setTimeout(async () => {
+            const expensesToRevert = state.blocks.filter(b => b.consumedSlotId === id);
+            for (const expense of expensesToRevert) {
+                const expenseDocRef = doc(db, blocksCollectionRef.path, expense.id);
+                await updateDoc(expenseDocRef, { column: 0, consumedSlotId: null });
+            }
+
+            const blockDocRef = doc(db, blocksCollectionRef.path, id);
+            await deleteDoc(blockDocRef);
+            
+            closeModal();
+        }, 300);
+    }
+
+    function setupDragAndDrop() {
+        const draggables = document.querySelectorAll('.block, .slot-container');
+        const dropTargets = document.querySelectorAll('.column, .slot, .new-transaction-drop-zone');
+
+        draggables.forEach(draggable => {
+            draggable.addEventListener('dragstart', (e) => {
+                e.stopPropagation();
+                if (draggable.classList.contains('block')) {
+                    state.draggedItemId = draggable.dataset.id;
+                    state.draggedItemType = 'block';
+                } else {
+                    state.draggedItemId = draggable.dataset.slotName;
+                    state.draggedItemType = 'slot';
+                }
+                draggable.classList.add('dragging');
+            });
+            draggable.addEventListener('dragend', (e) => {
+                e.stopPropagation();
+                state.draggedItemId = null;
+                state.draggedItemType = null;
+                draggable.classList.remove('dragging');
+                document.querySelectorAll('.drag-over').forEach(el => el.classList.remove('drag-over'));
+            });
+        });
+
+        dropTargets.forEach(target => {
+            target.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                
+                let isValidTarget = false;
+                const targetIsSlot = target.classList.contains('slot');
+
+                if (state.draggedItemType === 'block') {
+                    const draggedBlock = state.blocks.find(b => b.id === state.draggedItemId);
+                    if (!draggedBlock) return;
+
+                    if (targetIsSlot) {
+                        const slotType = target.dataset.slotType;
+                        if (draggedBlock.category === 'Cartão de Crédito' && slotType === 'cash') isValidTarget = true;
+                        if (draggedBlock.category !== 'Receita' && draggedBlock.category !== 'Cartão de Crédito' && slotType === 'credit') isValidTarget = true;
+                    } else {
+                        if (draggedBlock.category === 'Receita' || draggedBlock.category === 'Cartão de Crédito') isValidTarget = true;
+                    }
+                } else if (state.draggedItemType === 'slot') {
+                    if (!targetIsSlot) {
+                        isValidTarget = true;
+                    }
+                }
+
+                if (isValidTarget) target.classList.add('drag-over');
+            });
+            target.addEventListener('dragleave', (e) => {
+                e.stopPropagation();
+                target.classList.remove('drag-over');
+            });
+
+            target.addEventListener('drop', (e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                target.classList.remove('drag-over');
+                
+                const columnEl = target.closest('.column');
+                const targetDay = parseInt(columnEl.dataset.day);
+
+                if (state.draggedItemType === 'block') {
+                    handleDropBlock(target, targetDay);
+                } else if (state.draggedItemType === 'slot') {
+                    handleDropSlot(target, targetDay);
+                }
+            });
+        });
+    }
+
+    async function handleDropBlock(target, targetDay) {
+        const block = state.blocks.find(b => b.id === state.draggedItemId);
+        if (!block) return;
+
+        const targetIsSlot = target.classList.contains('slot');
+        const blockDocRef = doc(db, blocksCollectionRef.path, block.id);
+
+        if (targetIsSlot) {
+            const slotId = target.dataset.slotId;
+            const tempBlocks = JSON.parse(JSON.stringify(state.blocks));
+            const tempBlock = tempBlocks.find(b => b.id === block.id);
+            tempBlock.column = targetDay;
+            tempBlock.consumedSlotId = slotId;
+            
+            const futureStates = calculateColumnsStateFromData(tempBlocks);
+            for(let i = targetDay; i <= 31; i++) {
+                if (futureStates[i].availableCash < -0.01 || futureStates[i].availableCredit < -0.01) { // Tolerância para ponto flutuante
+                    showCustomAlert("Esta ação criaria um saldo negativo em um dia futuro!");
+                    return;
+                }
+            }
+            
+            await updateDoc(blockDocRef, { column: targetDay, consumedSlotId: slotId });
+        } else {
+            if (block.category === 'Receita' || block.category === 'Cartão de Crédito') {
+                 await updateDoc(blockDocRef, { column: targetDay, consumedSlotId: null });
+            } else {
+                showCustomAlert('Arraste despesas para um slot de crédito específico.');
+            }
+        }
+    }
+
+    async function handleDropSlot(target, targetDay) {
+        const slotName = state.draggedItemId;
+        const sourceBlocks = state.blocks.filter(b => b.name === slotName && (b.category === 'Receita' || b.category === 'Cartão de Crédito'));
+
+        if (targetDay === 0) {
+            for (const sourceBlock of sourceBlocks) {
+                const sourceBlockDocRef = doc(db, blocksCollectionRef.path, sourceBlock.id);
+                await updateDoc(sourceBlockDocRef, { column: 0 });
+
+                const expensesToRevert = state.blocks.filter(expense => expense.consumedSlotId === sourceBlock.id);
+                for (const expense of expensesToRevert) {
+                    const expenseDocRef = doc(db, blocksCollectionRef.path, expense.id);
+                    await updateDoc(expenseDocRef, { column: 0, consumedSlotId: null });
+                }
+            }
+        } 
+        else {
+            for (const sourceBlock of sourceBlocks) {
+                const sourceBlockDocRef = doc(db, blocksCollectionRef.path, sourceBlock.id);
+                await updateDoc(sourceBlockDocRef, { column: targetDay });
+            }
+        }
+    }
+
+
+    // --- FUNÇÕES UTILITÁRIAS ---
+    
+    function getContrastColor(hexcolor){
+        if (hexcolor.slice(0, 1) === '#') {
+            hexcolor = hexcolor.slice(1);
+        }
+        const r = parseInt(hexcolor.substr(0,2),16);
+        const g = parseInt(hexcolor.substr(2,2),16);
+        const b = parseInt(hexcolor.substr(4,2),16);
+        const yiq = ((r*299)+(g*587)+(b*114))/1000;
+        return (yiq >= 128) ? '#0f172a' : '#ffffff'; // slate-900 or white
+    }
+
+    function formatCurrencyShort(value) {
+        if (value === undefined || value === null) return 'R$ 0,00';
+        if (Math.abs(value) >= 1000) {
+            return `R$ ${(value / 1000).toFixed(1).replace('.', ',')}k`;
+        }
+        return `R$ ${value.toFixed(2).replace('.', ',')}`;
+    }
+
+    function shadeColor(color, percent) {
+        let R = parseInt(color.substring(1, 3), 16);
+        let G = parseInt(color.substring(3, 5), 16);
+        let B = parseInt(color.substring(5, 7), 16);
+        R = parseInt(R * (100 + percent) / 100);
+        G = parseInt(G * (100 + percent) / 100);
+        B = parseInt(B * (100 + percent) / 100);
+        R = (R < 255) ? R : 255;
+        G = (G < 255) ? G : 255;
+        B = (B < 255) ? B : 255;
+        const RR = ((R.toString(16).length === 1) ? "0" + R.toString(16) : R.toString(16));
+        const GG = ((G.toString(16).length === 1) ? "0" + G.toString(16) : G.toString(16));
+        const BB = ((B.toString(16).length === 1) ? "0" + B.toString(16) : B.toString(16));
+        return "#" + RR + GG + BB;
+    }
+
+    function getRandomColor() {
+        const letters = '0123456789ABCDEF';
+        let color = '#';
+        for (let i = 0; i < 6; i++) {
+            color += letters[Math.floor(Math.random() * 16)];
+        }
+        return color;
+    }
+    
+    function showCustomAlert(message) {
+        let alertBox = document.getElementById('custom-alert');
+        if (!alertBox) {
+            alertBox = document.createElement('div');
+            alertBox.id = 'custom-alert';
+            alertBox.className = 'fixed top-5 right-5 bg-red-500 text-white py-2 px-4 rounded-lg shadow-lg z-50 transition-transform duration-300 transform translate-x-full';
+            document.body.appendChild(alertBox);
+        }
+        alertBox.textContent = message;
+        
+        requestAnimationFrame(() => {
+            alertBox.style.transform = 'translateX(0)';
+        });
+
+        setTimeout(() => {
+            alertBox.style.transform = 'translateX(120%)';
+        }, 4000);
+    }
+    
+    function showConfirmationModal(message, onConfirm) {
+        const confirmModal = document.getElementById('confirmation-modal');
+        const messageEl = document.getElementById('confirmation-message');
+        const confirmBtn = document.getElementById('confirmation-confirm-btn');
+        const cancelBtn = document.getElementById('confirmation-cancel-btn');
+
+        messageEl.textContent = message;
+
+        const confirmHandler = () => {
+            onConfirm();
+            cleanup();
+        };
+
+        const cancelHandler = () => {
+            cleanup();
+        };
+
+        function cleanup() {
+            confirmModal.classList.add('hidden');
+            confirmModal.classList.remove('flex');
+            confirmBtn.removeEventListener('click', confirmHandler);
+            cancelBtn.removeEventListener('click', cancelHandler);
+        }
+
+        confirmBtn.addEventListener('click', confirmHandler);
+        cancelBtn.addEventListener('click', cancelHandler);
+
+        confirmModal.classList.remove('hidden');
+        confirmModal.classList.add('flex');
+    }
+
+
+    // --- INICIALIZAÇÃO E GERENCIAMENTO DE PÁGINAS ---
+    
+    function openPageModal(pageId = null) {
+        pageForm.reset();
+        const pageIdInput = document.getElementById('page-id');
+        const pageNameInput = document.getElementById('page-name');
+        
+        if (pageId) {
+            const page = state.pages.find(p => p.id === pageId);
+            pageModalTitle.textContent = "Renomear/Excluir Página";
+            pageIdInput.value = page.id;
+            pageNameInput.value = page.name;
+            pageDeleteBtn.classList.remove('hidden');
+            pageDeleteBtn.dataset.pageIdToDelete = pageId;
+            pageDeleteBtn.dataset.pageNameToDelete = page.name;
+        } else {
+            pageModalTitle.textContent = "Nova Página";
+            pageIdInput.value = '';
+            pageDeleteBtn.classList.add('hidden');
+        }
+        pageModal.classList.remove('hidden');
+        pageModal.classList.add('flex');
+        pageNameInput.focus();
+    }
+
+    async function handlePageFormSubmit(e) {
+        e.preventDefault();
+        const pageId = document.getElementById('page-id').value;
+        const pageName = document.getElementById('page-name').value.trim();
+        if (!pageName) return;
+
+        if (pageId) {
+            const pageDocRef = doc(db, pagesCollectionRef.path, pageId);
+            await updateDoc(pageDocRef, { name: pageName });
+        } else {
+            const newPageRef = await addDoc(pagesCollectionRef, { name: pageName });
+            switchPage(newPageRef.id);
+        }
+        pageModal.classList.add('hidden');
+        pageModal.classList.remove('flex');
+    }
+
+    async function deletePage(pageId) {
+        if (state.pages.length <= 1) {
+            showCustomAlert("Você não pode excluir sua única página.");
+            return;
+        }
+        
+        const pagePath = `artifacts/${appId}/users/${userId}/pages/${pageId}`;
+        const blocksToDeleteQuery = query(collection(db, `${pagePath}/blocks`));
+        const querySnapshot = await getDocs(blocksToDeleteQuery);
+        for (const docSnapshot of querySnapshot.docs) {
+            await deleteDoc(doc(db, `${pagePath}/blocks`, docSnapshot.id));
+        }
+
+        await deleteDoc(doc(db, pagesCollectionRef.path, pageId));
+    }
+
+
+    function switchPage(pageId) {
+        if (state.activePageId === pageId) return;
+        state.activePageId = pageId;
+        localStorage.setItem(`lastActivePage_${userId}`, pageId);
+        setupPageListeners(pageId);
+    }
+
+    function setupPageListeners(pageId) {
+        if (unsubscribeBlocks) unsubscribeBlocks();
+        
+        const pagePath = `artifacts/${appId}/users/${userId}/pages/${pageId}`;
+        blocksCollectionRef = collection(db, `${pagePath}/blocks`);
+
+        unsubscribeBlocks = onSnapshot(query(blocksCollectionRef), (snapshot) => {
+            state.blocks = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+            render();
+        }, (error) => {
+            console.error("Error listening to blocks collection:", error);
+            state.blocks = [];
+            render();
+        });
+    }
+
+    function initFirebaseAuth() {
+        onAuthStateChanged(auth, async user => {
+            if (user) {
+                userId = user.uid;
+                
+                loginBtn.classList.add('hidden');
+                userInfo.classList.remove('hidden');
+                userInfo.classList.add('flex');
+                mainControls.classList.remove('hidden');
+                mainControls.classList.add('flex');
+                
+                // Setup global categories listener
+                if (unsubscribeCategories) unsubscribeCategories();
+                categoriesDocRef = doc(db, `artifacts/${appId}/users/${userId}/settings`, 'categories');
+                unsubscribeCategories = onSnapshot(categoriesDocRef, async (docSnap) => {
+                    if (docSnap.exists()) {
+                        state.categories = docSnap.data();
+                    } else {
+                        const defaultCategories = {
+                            'Receita': '#22c55e', 'Cartão de Crédito': '#3b82f6', 'Alimentação': '#f97316',
+                            'Lazer': '#ec4899', 'Transporte': '#8b5cf6',
+                        };
+                        await setDoc(categoriesDocRef, defaultCategories);
+                        state.categories = defaultCategories;
+                    }
+                    render();
+                });
+                
+                // Setup pages listener
+                pagesCollectionRef = collection(db, `artifacts/${appId}/users/${userId}/pages`);
+                if (unsubscribePages) unsubscribePages();
+                unsubscribePages = onSnapshot(query(pagesCollectionRef), async (snapshot) => {
+                    const pagesFromDB = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+                    
+                    if (pagesFromDB.length === 0) {
+                        await addDoc(pagesCollectionRef, { name: "Meu Planejamento" });
+                        return; // onSnapshot will re-trigger with the new page
+                    }
+                    
+                    state.pages = pagesFromDB;
+                    const lastPageId = localStorage.getItem(`lastActivePage_${userId}`);
+                    const lastPageExists = state.pages.some(p => p.id === lastPageId);
+                    const currentPageStillExists = state.pages.some(p => p.id === state.activePageId);
+
+                    let targetPageId = state.activePageId;
+                    
+                    if (!currentPageStillExists) {
+                        targetPageId = lastPageExists ? lastPageId : (state.pages[0]?.id || null);
+                    }
+
+                    if (targetPageId !== state.activePageId) {
+                        switchPage(targetPageId);
+                    } else {
+                        render();
+                    }
+                });
+
+            } else {
+                // User is logged out
+                if (unsubscribeBlocks) unsubscribeBlocks();
+                if (unsubscribeCategories) unsubscribeCategories();
+                if (unsubscribePages) unsubscribePages();
+                userId = null;
+                state = { ...state, blocks: [], pages: [], activePageId: null };
+                
+                loginBtn.classList.remove('hidden');
+                userInfo.classList.add('hidden');
+                mainControls.classList.add('hidden');
+                mainControls.classList.remove('flex');
+                render();
+            }
+        });
+    }
+    
+    async function signIn() {
+        try {
+            if (auth.currentUser) return;
+            
+            if (typeof __initial_auth_token !== 'undefined' && __initial_auth_token) {
+                await signInWithCustomToken(auth, __initial_auth_token);
+            } else {
+                await signInAnonymously(auth);
+            }
+        } catch (error) {
+            console.error("Erro na autenticação:", error);
+            showCustomAlert("Não foi possível iniciar a sessão.");
+        }
+    }
+
+    async function signOutUser() {
+        try {
+            const oldUserId = userId;
+            await signOut(auth);
+            localStorage.removeItem(`lastActivePage_${oldUserId}`);
+        } catch (error) {
+            console.error("Erro ao sair:", error);
+        }
+    }
+
+    function initApp() {
+        cancelBtn.addEventListener('click', closeModal);
+        blockForm.addEventListener('submit', handleFormSubmit);
+        deleteBlockBtn.addEventListener('click', () => {
+            showConfirmationModal(
+                'Tem certeza que deseja excluir este bloco? As despesas associadas a ele voltarão para a fila.',
+                handleDeleteBlock
+            );
+        });
+        
+        vScaleSlider.addEventListener('input', (e) => {
+            state.scale = parseFloat(e.target.value);
+            render();
+        });
+        hScaleSlider.addEventListener('input', (e) => {
+            state.hScale = parseFloat(e.target.value);
+            render();
+        });
+
+        settingsBtn.addEventListener('click', () => {
+            renderSettingsModal();
+            settingsModal.classList.remove('hidden');
+            settingsModal.classList.add('flex');
+        });
+        closeSettingsBtn.addEventListener('click', () => {
+            settingsModal.classList.add('hidden');
+            settingsModal.classList.remove('flex');
+        });
+        
+        pageForm.addEventListener('submit', handlePageFormSubmit);
+        pageCancelBtn.addEventListener('click', () => {
+            pageModal.classList.add('hidden');
+            pageModal.classList.remove('flex');
+        });
+        
+        pageDeleteBtn.addEventListener('click', (e) => {
+            const pageId = e.currentTarget.dataset.pageIdToDelete;
+            const pageName = e.currentTarget.dataset.pageNameToDelete;
+            pageModal.classList.add('hidden');
+            pageModal.classList.remove('flex');
+            showConfirmationModal(
+                `Tem certeza que deseja excluir a página "${pageName}"? Todas as suas transações serão perdidas permanentemente.`,
+                () => deletePage(pageId)
+            );
+        });
+
+
+        document.addEventListener('keydown', (e) => {
+            if (e.key.toLowerCase() === 'n' && !['INPUT', 'SELECT', 'TEXTAREA'].includes(document.activeElement.tagName)) {
+                e.preventDefault();
+                openModal();
+            }
+        });
+
+        const toggleTotalsBtn = document.getElementById('toggle-totals-btn');
+        toggleTotalsBtn.addEventListener('click', () => {
+            state.showCategoryTotals = !state.showCategoryTotals;
+            toggleTotalsBtn.textContent = `Balance: ${state.showCategoryTotals ? 'ON' : 'OFF'}`;
+            toggleTotalsBtn.classList.toggle('bg-blue-100', state.showCategoryTotals);
+            toggleTotalsBtn.classList.toggle('text-blue-700', state.showCategoryTotals);
+            renderCategoryLegend();
+        });
+        
+        addBlockBtn.addEventListener('click', () => openModal());
+        loginBtn.addEventListener('click', signIn);
+        logoutBtn.addEventListener('click', signOutUser);
+
+        initFirebaseAuth();
+    }
+
+    initApp();
+</script>
+</body>
+</html>
